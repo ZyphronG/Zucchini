@@ -1,10 +1,10 @@
-# IT IS FINALLY HERE!!!
+# About Zucchini
 
 A **4-bit ADPCM encoder** for the **JSystem** engine, used by a bunch of GC and Wii games, such as **Super Mario Galaxy**.
 
 This tool can **convert standard 16-bit PCM WAV** files into raw **ADPCM4** files or **AST** (Aram Stream, streamed music format) files, using a high precision **4-bit ADPCM** encoding algorithm with up to **6 channels**!
 
-This is (probably) the first public release of an ADPCM encoder for the JSystem engine, which is **extremely accurate** when encoding, **precise**, fully supports **looping** and **loop point adjustments**, does **not decrease the loudness** of the output wave data and fully **prevents unwanted clicks or static noises** (even on console!).
+This is an ADPCM encoder for the JSystem engine, which is **extremely accurate** when encoding, **precise**, fully supports **looping** and **loop point adjustments**, does **not decrease the loudness** of the output wave data and fully **prevents unwanted clicks or static noises** (even on console!).
 
 <br>
 <br>
