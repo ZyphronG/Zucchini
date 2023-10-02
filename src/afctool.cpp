@@ -56,7 +56,7 @@ void AFC::ADPCM_INFO::setLoopData(u32 loopStart, u32 loopEnd) {
         u32 difference = loopStart - oldLoopStart; // calc difference
         loopEnd += difference;
         mNumSamples += difference;
-        printf("NOTICE! The loop points were changed to %d and %d\n", loopStart, loopEnd);
+        printf("NOTICE! The loop points were shifted:\n");
 
         s16* newPCM = new s16 [mNumSamples];
         for (u32 i = 0; i < oldNumSamples; i++) // copy from old PCM
