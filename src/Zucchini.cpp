@@ -1,6 +1,7 @@
 #include <ios>
 #include <cstring>
 #include <unistd.h>
+#include <filesystem>
 #include "include/BinaryReader.h"
 #include "include/afctool.h"
 #include "include/wavfile.h"
@@ -22,20 +23,29 @@ int main(int argv, char* argc[]) {
 
     // drag'n'drop
     if (argv == 2) {
+        char outFileCString[512];
         pInFile = argc[1];
+        std::filesystem::path outFile = argc[1];
 
-        if (!strcasecmp(pInFile + strlen(pInFile) - 4, ".wav")) {
-            pOutFile = "out.ast";
+        if (outFile.extension() == ".wav") {
+            outFile.replace_extension(".ast");
             action = 3;
         }
-        else if (!strcasecmp(pInFile + strlen(pInFile) - 6, ".adpcm") || !strcasecmp(pInFile + strlen(pInFile) - 4, ".adp")) {
-            pOutFile = "out.raw";
+        else if (outFile.extension() == ".adpcm" || outFile.extension() == ".adp") {
+            outFile.replace_extension(".raw");
             action = 2;
+        }
+        else if (outFile.extension() == ".ast") {
+            outFile.replace_extension(".ADPCM.ast");
+            action = 4;
         }
         else {
             printUsage();
             return 1;
         }
+
+        strncpy(outFileCString, outFile.u8string().c_str(), 511);
+        pOutFile = outFileCString;
     }
     else if (argv != 4 && argv != 6) {
         printUsage();
@@ -51,6 +61,8 @@ int main(int argv, char* argc[]) {
             action = 2;
         else if (!strcmp(argc[1], "ast"))
             action = 3;
+        else if (!strcmp(argc[1], "astconv"))
+            action = 4;
         else {
             printUsage();
             return 1;
@@ -174,6 +186,27 @@ int main(int argv, char* argc[]) {
         }
 
         if (!AST::makeAst(WaveData, out_file, wav.getNumSamples(), wav.getNumChannels(), wav.getSamplerate(), isLooped, loopStart, loopEnd)) {
+            sleep(5);
+            return 1;
+        }
+        
+        if (!out_file.writeFile()) {
+            printf("Could not write output file!\n");
+            sleep(5);
+            return 1;
+        }
+    }
+    else if (action == 4) {
+        BinaryReader in_file(pInFile);
+        BinaryReader out_file(pOutFile);
+
+        if (!in_file.loadFile()) {
+            printf("Could not open input file!\n");
+            sleep(5);
+            return 1;
+        }
+
+        if (!AST::convertAstPcm16ToAstAdpcm(in_file, out_file)) {
             sleep(5);
             return 1;
         }

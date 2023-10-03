@@ -15,4 +15,5 @@ namespace AST {
     u32 getNumBlckHeaders(u32 numSamples);
     u32 getBufferSize(u32 numSamples, u32 channels);
     bool makeAst(s16**, BinaryReader& outFile, u32 numSamples, u32 channels, u32 samplerate, bool isLooped, u32 loopStart, u32 loopEnd);
+    bool convertAstPcm16ToAstAdpcm(BinaryReader& inAst, BinaryReader& outAst);
 }

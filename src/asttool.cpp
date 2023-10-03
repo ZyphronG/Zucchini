@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <cstring>
+#include <unistd.h>
 #include "include/asttool.h"
 
 u32 AST::getNumBlckHeaders(u32 numSamples) {
@@ -109,7 +110,7 @@ bool AST::makeAst(s16** in, BinaryReader& outFile, u32 numSamples, u32 channels,
             penultAndLastPos += 4;
         }
         
-        std::cout << "\rConverting to AST: " << (f64)currAdpcmSample / (f64)numAdpcmSamples * 100.0 << '%' << std::flush;
+        std::cout << "\rConverting to AST: " << (f64)currAdpcmSample / (f64)numAdpcmSamples * 100.0 << "%     " << std::flush;
         currAdpcmSample += ADPCM_SAMPLES_PER_BLOCK;
     }
 
@@ -120,5 +121,90 @@ bool AST::makeAst(s16** in, BinaryReader& outFile, u32 numSamples, u32 channels,
         channelADPCM[c]->printEncodeInfoEnd();
     }
 
+    return true;
+}
+
+
+
+bool AST::convertAstPcm16ToAstAdpcm(BinaryReader& inAst, BinaryReader& outAst) {
+    // extract info from original AST
+    inAst.mCurrentPos = 0;
+
+    if (inAst.readU32BE() != 'STRM') { // header
+        printf("Input file is not a valid AST file!\n");
+        sleep(5);
+        return false;
+    }
+
+    if (inAst.readU32BE() + 0x40 != inAst.mFileSize) { // total block size
+        printf("Input AST seems to be corrupted!\n");
+        sleep(5);
+        return false;
+    }
+
+    if (inAst.readU16BE() != 1) { // encoding format
+        printf("Input AST is already ADPCM encoded!\n");
+        sleep(5);
+        return false;
+    }
+
+    inAst.readU16BE(); // decoded bits per sample?
+
+    u32 channels = inAst.readU16BE();
+
+    if (channels > 6) { // channel num
+        printf("Input AST has more than 6 channel thus it seems to invalid.\n");
+        sleep(5);
+        return false;
+    }
+
+    bool isLooped = (inAst.readU16BE() == 0xFFFF);
+    u32 sampleRate = inAst.readU32BE();
+    u32 numSamples = inAst.readU32BE();
+    u32 loopStart = inAst.readU32BE();
+    u32 loopEnd = inAst.readU32BE();
+
+    inAst.readU32BE(); // block size
+    inAst.readU32BE(); // unk
+    inAst.readU8(); // volume?
+
+    inAst.mCurrentPos = 0x40;
+
+    if (numSamples < loopEnd)
+        numSamples = loopEnd;
+
+    // extract PCM16 data
+    s16** pPCM = new s16 * [channels];
+
+    for (u32 c = 0; c < channels; c++)
+        pPCM[c] = new s16 [numSamples + 32]; // add a bit of extra buffer
+
+    for (u32 currSamp = 0; currSamp < numSamples;) {
+        if (inAst.readU32BE() != 'BLCK') { // header string
+            printf("Input AST is corrupted!\n");
+            sleep(5);
+            return false;
+        }
+
+        u32 blockSize = inAst.readU32BE();
+        inAst.mCurrentPos += 0x18;
+
+        if (blockSize % 2) {
+            printf("Input AST is corrupted!\n");
+            sleep(5);
+            return false;
+        }
+
+        blockSize /= 2;
+
+        for (u32 c = 0; c < channels; c++) {
+            for (u32 parser = 0; parser < blockSize && currSamp + parser < numSamples; parser++)
+                pPCM[c][currSamp + parser] = inAst.readS16BE();
+        }
+        
+        currSamp += blockSize;
+    }
+
+    makeAst(pPCM, outAst, numSamples, channels, sampleRate, isLooped, loopStart, loopEnd);
     return true;
 }
