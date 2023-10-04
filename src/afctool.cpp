@@ -239,22 +239,19 @@ void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
                 // quickly predict the best nibble to be used
                 s32 nibblePredict = convertPcmToNibble(pcm[s], c, i, last, penult);
 
-                if (nibblePredict < -8 || nibblePredict > 7) {
-                    leastError_nib = UINT64_MAX; // did not find a valid nibble for this coef and scale
-                }
+                if (nibblePredict > 7)
+                    nibblePredict = 7;
+                else if (nibblePredict < -8)
+                    nibblePredict = -8;
+                
+                u8 nibble_U8 = (u8)(nibblePredict & 0xF); // convert nibble to 4-bit
+                nibble_tmp[s] = nibble_U8;
+                decSample_nib = decodeSample(nibble_U8, c, i, last, penult);
+
+                if (isValidS16Value(decSample_nib))
+                    leastError_nib = llabs(decSample_nib - pcm[s]);
                 else {
-                    u8 nibble_U8 = (u8)(nibblePredict & 0xF); // convert nibble to 4-bit
-                    nibble_tmp[s] = nibble_U8;
-                    decSample_nib = decodeSample(nibble_U8, c, i, last, penult);
-
-                    if (!isValidS16Value(decSample_nib))
-                        leastError_nib = UINT64_MAX;
-                    else
-                        leastError_nib = llabs(decSample_nib - pcm[s]);
-                }
-
-                // if the prediction failed, bruteforce the best next nibble
-                if (leastError_nib == UINT64_MAX) {
+                    // if the prediction failed, bruteforce the best next nibble
                     for (u32 nib = 0; nib < 16; nib++) {
                         s32 dec_sample = decodeSample(nib, c, i, last, penult);
                         u64 nibDiff = llabs(dec_sample - pcm[s]);
@@ -265,11 +262,11 @@ void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
                             decSample_nib = dec_sample;
                         }
                     }
-                }
 
-                if (leastError_nib == UINT64_MAX) {
-                    diff = UINT64_MAX; // did not find a valid nibble for this coef and scale
-                    break;
+                    if (leastError_nib == UINT64_MAX) {
+                        diff = UINT64_MAX; // did not find a valid nibble for this coef and scale
+                        break;
+                    }
                 }
 
                 if (mIsLooped && (currSamp + s) == mLoopStart) {
