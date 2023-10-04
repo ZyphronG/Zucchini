@@ -45,7 +45,7 @@ bool AFC::ADPCM_INFO::setInputADPCMData(const BinaryReader& rIn, u32 dataLen) {
     return true;
 }
 
-void AFC::ADPCM_INFO::setLoopData(u32 loopStart, u32 loopEnd) {
+void AFC::ADPCM_INFO::setLoopData(u32 loopStart, u32 loopEnd, bool requireCoef0AtLoopStart) {
     // fix loop points
     if (loopStart % SAMPLES_PER_FRAME != 0) {
         printf("Adjusting loop points...\n");
@@ -84,6 +84,7 @@ void AFC::ADPCM_INFO::setLoopData(u32 loopStart, u32 loopEnd) {
     mLoopLast = 0;
     mLoopPenult = 0;
     mIsLooped = true;
+    mIsRequire0CoefAtLoop = requireCoef0AtLoopStart;
     
     printf("Loop Start: %u, Loop End: %u\n", getLoopStart(), getLoopEnd());
 }
@@ -216,7 +217,7 @@ void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
         nibble[nibiter] = 0;
 
     // we HAVE to force the coef 0 so the loops never require last and penult and are AST compatible (this is also how Nintendo did it)
-    u32 isForceCoef0 = ((mIsLooped && currSamp == mLoopStart) || currSamp == 0) ? 1 : 16;
+    u32 isForceCoef0 = ((mIsLooped && mIsRequire0CoefAtLoop && currSamp == mLoopStart) || currSamp == 0) ? 1 : 16;
 
     // create coefs
     for (u32 i = 0; i < isForceCoef0; i++) {
@@ -245,21 +246,25 @@ void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
                     nibblePredict = -8;
                 
                 u8 nibble_U8 = (u8)(nibblePredict & 0xF); // convert nibble to 4-bit
-                nibble_tmp[s] = nibble_U8;
                 decSample_nib = decodeSample(nibble_U8, c, i, last, penult);
 
-                if (isValidS16Value(decSample_nib))
+                if (isValidS16Value(decSample_nib)) {
                     leastError_nib = llabs(decSample_nib - pcm[s]);
+                    nibble_tmp[s] = nibble_U8;
+                }
                 else {
-                    // if the prediction failed, bruteforce the best next nibble
+                    // if the prediction failed, find next valid nibble
                     for (u32 nib = 0; nib < 16; nib++) {
                         s32 dec_sample = decodeSample(nib, c, i, last, penult);
-                        u64 nibDiff = llabs(dec_sample - pcm[s]);
                         
-                        if (nibDiff < leastError_nib && isValidS16Value(dec_sample)) {
-                            leastError_nib = nibDiff;
-                            nibble_tmp[s] = nib;
-                            decSample_nib = dec_sample;
+                        if (isValidS16Value(dec_sample)) {
+                            u64 nibDiff = llabs(dec_sample - pcm[s]);
+                            
+                            if (nibDiff < leastError_nib) {
+                                leastError_nib = nibDiff;
+                                nibble_tmp[s] = nib;
+                                decSample_nib = dec_sample;
+                            }
                         }
                     }
 

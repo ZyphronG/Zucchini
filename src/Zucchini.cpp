@@ -97,7 +97,7 @@ int main(int argv, char* argc[]) {
         adpcm.setInputPCMData(wavData[0], wav.getNumSamples());
 
         if (argv == 6)
-            adpcm.setLoopData(strtoul(argc[4], 0, 10), strtoul(argc[5], 0, 10));
+            adpcm.setLoopData(strtoul(argc[4], 0, 10), strtoul(argc[5], 0, 10), false);
         
         u8* buffer = adpcm.createADPCMBuffer();
 

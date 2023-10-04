@@ -46,7 +46,7 @@ bool AST::makeAst(s16** in, BinaryReader& outFile, u32 numSamples, u32 channels,
         adpcm->setInputPCMData(in[c], numSamples);
 
         if (isLooped)
-            adpcm->setLoopData(loopStart, loopEnd);
+            adpcm->setLoopData(loopStart, loopEnd, true);
 
         // make header
         if (c == 0) {
