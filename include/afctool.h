@@ -31,8 +31,11 @@ namespace AFC {
         s16 mLast = 0;
         s16 mPenult = 0;
         
+        // loop related members
         bool mIsLooped = false;
         bool mIsRequire0CoefAtLoop = false;
+        u32 mSourceNumSamples = 0;
+        u32 mSourceLoopStart = 0;
         u32 mLoopStart = 0;
         u32 mLoopEnd = 0;
         s16 mLoopLast = 0;
@@ -44,7 +47,7 @@ namespace AFC {
         bool setInputPCMData(const BinaryReader&, u32 dataLen); // call this function first!
         void setInputPCMData(s16*, u32 numSamples); // call this function first!
         bool setInputADPCMData(const BinaryReader&, u32 dataLen); // call this function first!
-        void setLoopData(u32 loopStart, u32 loopEnd, bool requireCoef0AtLoopStart);
+        void setLoopData(u32 loopStart, u32 loopEnd, bool requireCoef0AtLoopStart); // requireCoef0AtLoopStart only required to be set to "true" for AST
 
         u8* createADPCMBuffer() const;
         u32 getADPCMBufferSize() const;

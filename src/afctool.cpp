@@ -21,12 +21,14 @@ bool AFC::ADPCM_INFO::setInputPCMData(const BinaryReader& rIn, u32 dataLen) {
         pcmData[i] = rIn.readS16LE(rIn.mCurrentPos + i * sizeof(s16));
     
     mPCM = pcmData;
+    mSourceNumSamples = mNumSamples;
     return true;
 }
 
 void AFC::ADPCM_INFO::setInputPCMData(s16* pcmData, u32 numSamples) {
     mPCM = pcmData;
     mNumSamples = numSamples;
+    mSourceNumSamples = numSamples;
 }
 
 bool AFC::ADPCM_INFO::setInputADPCMData(const BinaryReader& rIn, u32 dataLen) {
@@ -36,37 +38,40 @@ bool AFC::ADPCM_INFO::setInputADPCMData(const BinaryReader& rIn, u32 dataLen) {
     }
 
     mNumSamples = (u32)(dataLen + (BYTES_PER_FRAME - 1)) / (u32)BYTES_PER_FRAME * (u32)SAMPLES_PER_FRAME;
-    u8* pcmData = new u8 [dataLen];
+    u8* adpcmData = new u8 [dataLen];
 
     for (u32 i = 0; i < dataLen; i++)
-        pcmData[i] = rIn.readU8(rIn.mCurrentPos + i * sizeof(u8));
+        adpcmData[i] = rIn.readU8(rIn.mCurrentPos + i * sizeof(u8));
     
-    mADPCM = pcmData;
+    mADPCM = adpcmData;
+    mSourceNumSamples = mNumSamples;
     return true;
 }
 
 void AFC::ADPCM_INFO::setLoopData(u32 loopStart, u32 loopEnd, bool requireCoef0AtLoopStart) {
+    if (loopStart >= loopEnd || loopStart >= mNumSamples) {
+        printf("WARNING! Invalid LoopStartSample was given!\nMake sure it's lower than the LoopEndSample.\nLoopStartSample set to 0...\n");
+        mLoopStart = 0;
+    }
+    else
+        mLoopStart = loopStart;
+
+    mLoopLast = 0;
+    mLoopPenult = 0;
+    mIsLooped = true;
+    mIsRequire0CoefAtLoop = requireCoef0AtLoopStart;
+    mSourceLoopStart = mLoopStart;
+
     // fix loop points
-    if (loopStart % SAMPLES_PER_FRAME != 0) {
+    if (mLoopStart % SAMPLES_PER_FRAME != 0) {
         printf("Adjusting loop points...\n");
 
-        u32 oldLoopStart = loopStart;
-        u32 oldNumSamples = mNumSamples;
-        loopStart = (u32)(loopStart + (SAMPLES_PER_FRAME - 1)) / (u32)SAMPLES_PER_FRAME * (u32)SAMPLES_PER_FRAME;
-        u32 difference = loopStart - oldLoopStart; // calc difference
+        mLoopStart = (u32)(mLoopStart + (SAMPLES_PER_FRAME - 1)) / (u32)SAMPLES_PER_FRAME * (u32)SAMPLES_PER_FRAME;
+        u32 difference = mLoopStart - mSourceLoopStart; // calc difference
         loopEnd += difference;
         mNumSamples += difference;
+
         printf("NOTICE! The loop points were shifted:\n");
-
-        s16* newPCM = new s16 [mNumSamples];
-        for (u32 i = 0; i < oldNumSamples; i++) // copy from old PCM
-            newPCM[i] = mPCM[i];
-        
-        for (u32 i = oldLoopStart; i < loopStart; i++)
-            newPCM[oldNumSamples++] = mPCM[i]; // copy samples after original loop start to end of new PCM data
-
-        free(mPCM);
-        mPCM = newPCM;
     }
 
     if (loopEnd >= mNumSamples)
@@ -75,16 +80,6 @@ void AFC::ADPCM_INFO::setLoopData(u32 loopStart, u32 loopEnd, bool requireCoef0A
         mNumSamples = loopEnd;
         mLoopEnd = loopEnd;
     }
-
-    if (loopStart >= mLoopEnd)
-        mLoopStart = 0;
-    else
-        mLoopStart = loopStart;
-
-    mLoopLast = 0;
-    mLoopPenult = 0;
-    mIsLooped = true;
-    mIsRequire0CoefAtLoop = requireCoef0AtLoopStart;
     
     printf("Loop Start: %u, Loop End: %u\n", getLoopStart(), getLoopEnd());
 }
@@ -144,7 +139,6 @@ void AFC::ADPCM_INFO::encode(u8* dst, u32 startSample, u32 numSamples) {
 
 void AFC::ADPCM_INFO::printEncodeInfoStart() const {
     printf("Number of samples to encode: %u\n", getNumSamples());
-
 }
 
 void AFC::ADPCM_INFO::printEncodeInfoEnd() const {
@@ -158,6 +152,9 @@ void AFC::ADPCM_INFO::decode(s16* dst) {
     }
 
     printf("Number of samples to decode: %u\n", getNumSamples());
+    
+    s16 pcm[SAMPLES_PER_FRAME];
+    u32 bufferPos = 0;
 
     // init
     mLast = 0;
@@ -165,9 +162,11 @@ void AFC::ADPCM_INFO::decode(s16* dst) {
     const u8* adpcm = mADPCM;
 
     for (u32 i = 0; i < mNumSamples; i += SAMPLES_PER_FRAME) {
-        decodeFrame(adpcm, dst);
-        dst += SAMPLES_PER_FRAME;
+        decodeFrame(adpcm, pcm);
         adpcm += BYTES_PER_FRAME;
+
+        for (u32 s = 0; s < SAMPLES_PER_FRAME && i + s < mNumSamples; s++)
+            dst[bufferPos++] = pcm[s];
     }
 }
 
@@ -199,37 +198,79 @@ u32 AFC::ADPCM_INFO::getNumSamples() const {
     return mNumSamples;
 }
 
+// from TLoZ Wind Waker's DecodeADPCM function
+inline s32 AFC::decodeSample(u8 nibble, u8 scale, u8 index, s16 last, s16 penult) {
+    return (sAdpcmNibbleToInt[nibble] << scale) + ((sAdpcmCoefficents[index][0] * last + sAdpcmCoefficents[index][1] * penult) >> 11);
+}
+
+inline s32 AFC::convertPcmToNibble(s16 PCM, u8 scale, u8 index, s16 last, s16 penult) {
+    s32 scaleVal = (1 << scale);
+    s32 coeffVal = (PCM - ((sAdpcmCoefficents[index][0] * last + sAdpcmCoefficents[index][1] * penult) >> 11));
+
+    f64 result = (f64)(coeffVal) / (f64)(scaleVal);
+
+    // help with rounding
+    if (result < 0.0)
+        result -= 0.5;
+    else if (result > 0.0)
+        result += 0.5;
+
+    return (s32)(result);
+}
+
+inline bool AFC::isValidS16Value(s32 i) {
+    if (i > INT16_MAX)
+        return false;
+    else if (i < INT16_MIN)
+        return false;
+    else
+        return true;
+}
+
 void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
-    u8 nibble[SAMPLES_PER_FRAME]; // 4-bit nibble
+    u8 nibble[SAMPLES_PER_FRAME] = { 0 }; // 4-bit nibble
     u32 samples = (mNumSamples - currSamp >= SAMPLES_PER_FRAME) ? SAMPLES_PER_FRAME : mNumSamples - currSamp;
     u64 leastDiff = UINT64_MAX;
     s16 leastLast = 0;
     s16 leastPenalt = 0;
     u8 leastIndex = 0;
     u8 leastScale = 0;
-    s16* pcm = mPCM + currSamp;
+    u32 ForceCoef0 = 16;
+    s16 pcm[SAMPLES_PER_FRAME];
 
     if (currSamp >= mNumSamples) // don't decode 0 left samples
         return;
 
-    // init nibble data
-    for (u32 nibiter = 0; nibiter < SAMPLES_PER_FRAME; nibiter++)
-        nibble[nibiter] = 0;
+    // init pcm data
+    u32 originalLoopStart = mSourceLoopStart;
+    for (u32 s = 0; s < samples; s++) {
+        if (currSamp + s < mSourceNumSamples)
+            pcm[s] = mPCM[currSamp + s];
+        else if (mIsLooped)
+            pcm[s] = mPCM[originalLoopStart++];
+        else
+            pcm[s] = 0;
+    }
 
-    // we HAVE to force the coef 0 so the loops never require last and penult and are AST compatible (this is also how Nintendo did it)
-    u32 isForceCoef0 = ((mIsLooped && mIsRequire0CoefAtLoop && currSamp == mLoopStart) || currSamp == 0) ? 1 : 16;
+    if (mIsLooped && currSamp == mLoopStart) {
+        mLoopLast = mLast;
+        mLoopPenult = mPenult;
+
+        if (mIsRequire0CoefAtLoop) // force coef0 at loopStart for AST only
+            ForceCoef0 = 1;
+    }
+
+    if (currSamp == 0) // always force coef0 at start
+        ForceCoef0 = 1;
 
     // create coefs
-    for (u32 i = 0; i < isForceCoef0; i++) {
+    for (u32 i = 0; i < ForceCoef0; i++) {
 
         // create scale
         for (u32 c = 0; c < 16; c++) {
             s16 penult = mPenult;
             s16 last = mLast;
             u64 diff = 0;
-            bool isSetLoop = false;
-            s16 loopLast = 0;
-            s16 loopPenult = 0;
             u8 nibble_tmp[SAMPLES_PER_FRAME];
             
             // create sample nibbles
@@ -274,12 +315,6 @@ void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
                     }
                 }
 
-                if (mIsLooped && (currSamp + s) == mLoopStart) {
-                    loopLast = last;
-                    loopPenult = penult;
-                    isSetLoop = true;
-                }
-
                 diff += leastError_nib;
                 penult = last;
                 last = decSample_nib;
@@ -294,11 +329,6 @@ void AFC::ADPCM_INFO::encodeFrame(u8 dst[BYTES_PER_FRAME], u32 currSamp) {
 
                 for (u32 nibiter = 0; nibiter < samples; nibiter++)
                     nibble[nibiter] = nibble_tmp[nibiter];
-                
-                if (isSetLoop) {
-                    mLoopLast = loopLast;
-                    mLoopPenult = loopPenult;
-                }
             }
         }
     }
@@ -430,35 +460,6 @@ void AFC::ADPCM_INFO::decodeFrame(const u8 adpcm[BYTES_PER_FRAME], s16 dst[SAMPL
         mPenult = mLast;
         mLast = dst[i * 2 + 1];
     }
-}
-
-// from TLoZ Wind Waker's DecodeADPCM function
-s32 AFC::decodeSample(u8 nibble, u8 scale, u8 index, s16 last, s16 penult) {
-    return (sAdpcmNibbleToInt[nibble] << scale) + ((sAdpcmCoefficents[index][0] * last + sAdpcmCoefficents[index][1] * penult) >> 11);
-}
-
-s32 AFC::convertPcmToNibble(s16 PCM, u8 scale, u8 index, s16 last, s16 penult) {
-    s32 scaleVal = (1 << scale);
-    s32 coeffVal = (PCM - ((sAdpcmCoefficents[index][0] * last + sAdpcmCoefficents[index][1] * penult) >> 11));
-
-    f64 result = (f64)(coeffVal) / (f64)(scaleVal);
-
-    // help with rounding
-    if (result < 0.0)
-        result -= 0.5;
-    else if (result > 0.0)
-        result += 0.5;
-
-    return (s32)(result);
-}
-
-bool AFC::isValidS16Value(s32 i) {
-    if (i > INT16_MAX)
-        return false;
-    else if (i < INT16_MIN)
-        return false;
-    else
-        return true;
 }
 
 u32 AFC::getADPCMBufferSize(u32 numSamples) {
