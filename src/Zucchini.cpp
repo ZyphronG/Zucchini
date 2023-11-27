@@ -98,6 +98,8 @@ int main(int argv, char* argc[]) {
 
         if (argv == 6)
             adpcm.setLoopData(strtoul(argc[4], 0, 10), strtoul(argc[5], 0, 10), false);
+        else if (wav.isLooped())
+            adpcm.setLoopData(wav.getLoopStartSample(), wav.getLoopEndSample(), false);
         
         u8* buffer = adpcm.createADPCMBuffer();
 
@@ -175,9 +177,9 @@ int main(int argv, char* argc[]) {
             return 1;
         }
 
-        bool isLooped = (argv == 2); // check drag'n'drop
-        u32 loopStart = 0;
-        u32 loopEnd = wav.getNumSamples();
+        bool isLooped = wav.isLooped();
+        u32 loopStart = wav.getLoopStartSample();
+        u32 loopEnd = wav.getLoopEndSample();
 
         if (argv == 6) {
             isLooped = true;
